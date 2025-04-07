@@ -1,0 +1,106 @@
+trigger:
+- master
+
+variables:
+  azureSubscription: '3c687baa-b104-4f59-90c9-2a87c3e5c5bb'
+  functionAppName: 'functionAppHelloPotato'
+  vmImageName: 'ubuntu-latest'
+  workingDirectory: './'
+  PYTHON_VERSION: '3.10.16'
+  PYTHON_MAJOR: '3'
+  PYTHON_INSTALL_DIR: '$(Agent.ToolsDirectory)/Python/$(PYTHON_VERSION)/x64'
+
+stages:
+- stage: Build
+  displayName: Build stage
+
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: SelfHostedPool
+
+    steps:
+    - checkout: self
+      displayName: 'Checkout code from repository'
+
+    - bash: |
+        echo "Agent Tools Directory: $(Agent.ToolsDirectory)"
+        echo "Working Directory: $(workingDirectory)"
+        echo "Python Install Directory: $(PYTHON_INSTALL_DIR)"
+        echo "Current directory content:"
+        ls -la
+      displayName: 'Debug: Initial environment info'
+
+    - bash: |
+        echo "Checking Python installation"
+        echo "Python Install Directory: $(PYTHON_INSTALL_DIR)"
+        ls -la $(PYTHON_INSTALL_DIR)/bin
+        echo "Python version:"
+        $(PYTHON_INSTALL_DIR)/bin/python3 --version
+        echo "Pip version:"
+        $(PYTHON_INSTALL_DIR)/bin/pip3 --version
+      displayName: 'Debug: Check Python installation'
+
+    - bash: |
+        echo "Python version in use:"
+        $(PYTHON_INSTALL_DIR)/bin/python3 --version
+        $(PYTHON_INSTALL_DIR)/bin/python3 -m venv antenv
+        source antenv/bin/activate
+        $(PYTHON_INSTALL_DIR)/bin/python3 -m pip install --upgrade pip
+        $(PYTHON_INSTALL_DIR)/bin/pip3 install -r requirements.txt --target="./.python_packages/lib/site-packages"
+        echo "Listing installed packages:"
+        $(PYTHON_INSTALL_DIR)/bin/pip3 list
+      workingDirectory: $(workingDirectory)
+      displayName: 'Install application dependencies'
+
+    - bash: |
+        echo "Listing Python packages directory:"
+        ls -la $(workingDirectory)/.python_packages/lib/site-packages
+      displayName: 'Debug: List Python packages'
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive files'
+      inputs:
+        rootFolderOrFile: '$(workingDirectory)'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+        replaceExistingArchive: true
+
+    - bash: |
+        echo "Checking archived file:"
+        ls -la $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip || echo "ZIP file not found"
+      displayName: 'Debug: Check archived ZIP'
+
+    - publish: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+      artifact: drop
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: 'development'
+    pool:
+      name: SelfHostedPool
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - bash: |
+              echo "Deploying to Azure Function App: $(functionAppName)"
+              echo "Using package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip"
+            displayName: 'Debug: Deployment info'
+
+          - task: AzureFunctionApp@1
+            displayName: 'Azure functions app deploy'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              appType: functionAppLinux
+              appName: $(functionAppName)
+              package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
