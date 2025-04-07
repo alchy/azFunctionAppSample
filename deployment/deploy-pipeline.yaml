@@ -2,11 +2,11 @@ trigger:
 - master
 
 variables:
-  azureSubscription: '3c687baa-b104-4f59-90c9-2a87c3e5c5bb'
+  azureSubscription: 'ServiceConnectionForPythonPipeline'
   functionAppName: 'functionAppHelloPotato'
   vmImageName: 'ubuntu-latest'
   workingDirectory: './'
-  PYTHON_VERSION: '3.10.16'
+  PYTHON_VERSION: '3.10.16'  
   PYTHON_MAJOR: '3'
   PYTHON_INSTALL_DIR: '$(Agent.ToolsDirectory)/Python/$(PYTHON_VERSION)/x64'
 
@@ -93,14 +93,45 @@ stages:
         deploy:
           steps:
           - bash: |
-              echo "Deploying to Azure Function App: $(functionAppName)"
-              echo "Using package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip"
-            displayName: 'Debug: Deployment info'
+              echo "Testing Azure AD connectivity"
+              curl -I https://login.microsoftonline.com || echo "Failed to reach Azure AD"
+              echo "Testing Azure DevOps connectivity"
+              curl -I https://dev.azure.com/jindrichnemec || echo "Failed to reach Azure DevOps"
+              echo "Service connection details:"
+              echo "Subscription ID: $(azureSubscription)"
+              echo "Function App Name: $(functionAppName)"
+              echo "Package path: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip"
+              ls -la $(Pipeline.Workspace)/drop/$(Build.BuildId).zip || echo "Package not found"
+            displayName: 'Debug: Pre-deploy check'
 
-          - task: AzureFunctionApp@1
-            displayName: 'Azure functions app deploy'
+          - task: AzureCLI@2
+            displayName: 'Deploy Function App (Azure CLI)'
             inputs:
               azureSubscription: '$(azureSubscription)'
-              appType: functionAppLinux
-              appName: $(functionAppName)
-              package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                RESOURCE_GROUP="rg-azfunction" # Nahraďte skutečným názvem skupiny prostředků
+                az functionapp deployment source config-zip \
+                  --resource-group $RESOURCE_GROUP \
+                  --name $(functionAppName) \
+                  --src $(Pipeline.Workspace)/drop/$(Build.BuildId).zip
+
+          - task: AzureCLI@2
+            displayName: 'Get Function App URL'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                RESOURCE_GROUP="rg-azfunction" # Nahraďte skutečným názvem skupiny prostředků
+                FUNCTION_APP_URL=$(az functionapp show --resource-group $RESOURCE_GROUP --name $(functionAppName) --query defaultHostName -o tsv)
+                echo "Function App URL: https://$FUNCTION_APP_URL"
+                echo "##vso[task.setvariable variable=FUNCTION_APP_URL;isOutput=true]https://$FUNCTION_APP_URL"
+            name: GetFunctionAppUrl # Pojmenování tasku, abychom mohli získat výstupní proměnnou
+
+          - bash: |
+              echo "Function App URL from variable: $(GetFunctionAppUrl.FUNCTION_APP_URL)"
+            displayName: 'Display Function App URL'
+
+  
