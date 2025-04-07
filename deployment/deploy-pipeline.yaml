@@ -6,7 +6,7 @@ variables:
   functionAppName: 'functionAppHelloPotato'
   vmImageName: 'ubuntu-latest'
   workingDirectory: './'
-  PYTHON_VERSION: '3.10.16'  
+  PYTHON_VERSION: '3.10.16'  # Uprav na 3.10.7, pokud je to tvá verze
   PYTHON_MAJOR: '3'
   PYTHON_INSTALL_DIR: '$(Agent.ToolsDirectory)/Python/$(PYTHON_VERSION)/x64'
 
@@ -134,4 +134,3 @@ stages:
               echo "Function App URL from variable: $(GetFunctionAppUrl.FUNCTION_APP_URL)"
             displayName: 'Display Function App URL'
 
-  
